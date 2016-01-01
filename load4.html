@@ -1,0 +1,410 @@
+<html>
+
+<head>
+<title>Pool</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+<script type="text/javascript" src="webgl-obj-loader3.js"></script>
+
+<script id="shader-fs" type="x-shader/x-fragment">
+	precision mediump float;
+
+	varying vec2 vTextureCoord;
+    varying vec3 vLightWeighting;
+	uniform sampler2D uSampler;
+
+	void main(void) {
+			vec4 textureColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+			gl_FragColor = vec4(textureColor.rgb * vLightWeighting, textureColor.a);
+	}
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+	attribute vec3 aVertexPosition;
+	attribute vec2 aTextureCoord;
+    attribute vec3 aVertexNormal;
+
+	uniform mat4 uMVMatrix;
+	uniform mat4 uPMatrix;
+    uniform mat3 uNMatrix;
+
+	uniform vec3 uAmbientColor;
+
+	uniform vec3 uLightingDirection;
+	uniform vec3 uDirectionalColor;
+
+	uniform bool uUseLighting;
+
+	varying vec2 vTextureCoord;
+	varying vec3 vLightWeighting;
+
+
+	void main(void) {
+			gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+			vTextureCoord = aTextureCoord;
+
+			if (!uUseLighting) {
+				vLightWeighting = vec3(1.0, 1.0, 1.0);
+			} else {
+				vec3 transformedNormal = uNMatrix * aVertexNormal;
+				float directionalLightWeighting = max(dot(transformedNormal, uLightingDirection), 0.0);
+				vLightWeighting = uAmbientColor + uDirectionalColor * directionalLightWeighting;
+			}
+		}
+</script>
+
+
+<script type="text/javascript">
+
+//var textureFile = "haus.jpg";
+//var obj = "g2.obj"
+
+	var textureFile = "TT1024X1024.jpg";
+	var obj = "ZHANJIAN.obj"
+
+	var app = {};
+	app.meshes = {};
+
+	var mesh;
+	
+
+	var gl;
+
+	function initGL(canvas) {
+			try {
+					gl = canvas.getContext("experimental-webgl");
+					gl.viewportWidth = canvas.width;
+					gl.viewportHeight = canvas.height;
+			} catch (e) {
+			}
+			if (!gl) {
+					alert("Could not initialise WebGL, sorry :-(");
+			}
+	}
+
+
+	function getShader(gl, id) {
+			var shaderScript = document.getElementById(id);
+			if (!shaderScript) {
+					return null;
+			}
+
+			var str = "";
+			var k = shaderScript.firstChild;
+			while (k) {
+					if (k.nodeType == 3) {
+							str += k.textContent;
+					}
+					k = k.nextSibling;
+			}
+
+			var shader;
+			if (shaderScript.type == "x-shader/x-fragment") {
+					shader = gl.createShader(gl.FRAGMENT_SHADER);
+			} else if (shaderScript.type == "x-shader/x-vertex") {
+					shader = gl.createShader(gl.VERTEX_SHADER);
+			} else {
+					return null;
+			}
+
+			gl.shaderSource(shader, str);
+			gl.compileShader(shader);
+
+			if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+					alert(gl.getShaderInfoLog(shader));
+					return null;
+			}
+
+			return shader;
+	}
+
+
+	var shaderProgram;
+
+	function initShaders() {
+			var fragmentShader = getShader(gl, "shader-fs");
+			var vertexShader = getShader(gl, "shader-vs");
+
+			shaderProgram = gl.createProgram();
+			gl.attachShader(shaderProgram, vertexShader);
+			gl.attachShader(shaderProgram, fragmentShader);
+			gl.linkProgram(shaderProgram);
+
+			if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+					alert("Could not initialise shaders");
+			}
+
+			gl.useProgram(shaderProgram);
+
+shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+			gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+			shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+			gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+			shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+			gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+			shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+			shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+			shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+			shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+			shaderProgram.useLightingUniform = gl.getUniformLocation(shaderProgram, "uUseLighting");
+			shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
+			shaderProgram.lightingDirectionUniform = gl.getUniformLocation(shaderProgram, "uLightingDirection");
+			shaderProgram.directionalColorUniform = gl.getUniformLocation(shaderProgram, "uDirectionalColor");		
+	}
+
+
+	function handleLoadedTexture(texture) {
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+
+
+	var neheTexture;
+
+	function initTexture() {
+			neheTexture = gl.createTexture();
+			neheTexture.image = new Image();
+			neheTexture.image.onload = function () {
+					handleLoadedTexture(neheTexture);
+					tick();
+			}
+
+			neheTexture.image.src = textureFile;
+//			console.log(neheTexture.image);
+	}
+
+
+		var mvMatrix = mat4.create();
+		var mvMatrixStack = [];
+		var pMatrix = mat4.create();
+
+		function mvPushMatrix() {
+				var copy = mat4.create();
+				mat4.set(mvMatrix, copy);
+				mvMatrixStack.push(copy);
+		}
+
+		function mvPopMatrix() {
+				if (mvMatrixStack.length == 0) {
+						throw "Invalid popMatrix!";
+				}
+				mvMatrix = mvMatrixStack.pop();
+		}
+
+
+		function setMatrixUniforms() {
+				gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+				gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+				var normalMatrix = mat3.create();
+				mat4.toInverseMat3(mvMatrix, normalMatrix);
+				mat3.transpose(normalMatrix);
+				gl.uniformMatrix3fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+
+		}
+
+
+		function degToRad(degrees) {
+				return degrees * Math.PI / 180;
+		}
+
+		var xRot = 0;
+		var yRot = 0;
+		var zRot = 0;
+
+		function drawScene() {
+				gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+				gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+				mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 1000.0, pMatrix);
+
+				mat4.identity(mvMatrix);
+
+				mat4.translate(mvMatrix, [0.0, 0.0, -30.0]);
+
+				mat4.rotate(mvMatrix, degToRad(xRot), [1, 0, 0]);
+				mat4.rotate(mvMatrix, degToRad(yRot), [0, 1, 0]);
+				mat4.rotate(mvMatrix, degToRad(zRot), [0, 0, 1]);
+
+// now to render the mesh
+				gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, mesh.vertexBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+				// it's possible that the mesh doesn't contain
+				// any texture coordinates (e.g. suzanne.obj in the development branch).
+				// in this case, the texture vertexAttribArray will need to be disabled
+				// before the call to drawElements
+				if(!mesh.textures.length){
+					gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+				}
+				else{
+					// if the texture vertexAttribArray has been previously
+					// disabled, then it needs to be re-enabled
+					gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+					gl.bindBuffer(gl.ARRAY_BUFFER, mesh.textureBuffer);
+					gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, mesh.textureBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+					gl.activeTexture(gl.TEXTURE0);
+					gl.bindTexture(gl.TEXTURE_2D, neheTexture);
+					gl.uniform1i(shaderProgram.samplerUniform, 0);
+				}
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, mesh.normalBuffer);
+				gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, mesh.normalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				var lighting = document.getElementById("lighting").checked;
+				gl.uniform1i(shaderProgram.useLightingUniform, lighting);
+				if (lighting) {
+					gl.uniform3f(
+						shaderProgram.ambientColorUniform,
+						parseFloat(document.getElementById("ambientR").value),
+						parseFloat(document.getElementById("ambientG").value),
+						parseFloat(document.getElementById("ambientB").value)
+					);
+
+					var lightingDirection = [
+						parseFloat(document.getElementById("lightDirectionX").value),
+						parseFloat(document.getElementById("lightDirectionY").value),
+						parseFloat(document.getElementById("lightDirectionZ").value)
+					];
+					var adjustedLD = vec3.create();
+					vec3.normalize(lightingDirection, adjustedLD);
+					vec3.scale(adjustedLD, -1);
+					gl.uniform3fv(shaderProgram.lightingDirectionUniform, adjustedLD);
+
+					gl.uniform3f(
+						shaderProgram.directionalColorUniform,
+						parseFloat(document.getElementById("directionalR").value),
+						parseFloat(document.getElementById("directionalG").value),
+						parseFloat(document.getElementById("directionalB").value)
+					);
+				}
+
+
+
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
+				setMatrixUniforms();
+				gl.drawElements(gl.TRIANGLES, mesh.indexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+		}
+
+
+		var lastTime = 0;
+
+		function animate() {
+//				var timeNow = new Date().getTime();
+//				if (lastTime != 0) {
+//						var elapsed = timeNow - lastTime;
+//
+//						xRot += (30 * elapsed) / 1000.0;
+//						yRot += (30 * elapsed) / 1000.0;
+//						zRot += (30 * elapsed) / 1000.0;
+//				}
+//				lastTime = timeNow;
+		}
+
+
+		function tick() {
+				requestAnimFrame(tick);
+				drawScene();
+				animate();
+		}
+
+
+
+		
+		function webGLStart(meshes) {
+				console.log("in webgl start");
+				var canvas = document.getElementById("lesson05-canvas");
+				initGL(canvas);
+				app.meshes = meshes;
+				
+				initShaders();
+//				initBuffers();
+
+//				OBJ.initMeshBuffers(gl, mesh);
+				OBJ.initMeshBuffers(gl, app.meshes['table1']);
+				mesh = app.meshes['table1'];
+				
+//				console.log(mesh);
+				initTexture();
+
+				gl.clearColor(0.0, 0.0, 0.0, 1.0);
+				gl.enable(gl.DEPTH_TEST);
+	
+//				drawScene();
+//				tick();
+		}
+		
+		function load2 () {
+			console.log("onload");
+			
+			OBJ.downloadMeshes({
+				'table1': obj
+			}, webGLStart);
+			
+			console.log("after onload");
+		}
+		
+		function load() {
+			console.log("load event detected!");
+		}
+		
+		
+		
+		window.onload = load2;
+
+</script>
+
+
+</head>
+
+<!--  onload="webGLStart();" -->
+<body>
+<!-- 		<a href="http://learningwebgl.com/blog/?p=507">&lt;&lt; Back to Lesson 5</a><br /> -->
+
+		<canvas id="lesson05-canvas" style="border: none;" width="1000" height="800"></canvas>
+
+		<br />
+		<input type="checkbox" id="lighting" checked /> Use lighting<br/>
+		(Use cursor keys to spin the box and <code>Page Up</code>/<code>Page Down</code> to zoom out/in)
+
+		<br/>
+		<h2>Directional light:</h2>
+
+		<table style="border: 0; padding: 10px;">
+			<tr>
+				<td><b>Direction:</b>
+				<td>X: <input type="text" id="lightDirectionX" value="-0.25" />
+				<td>Y: <input type="text" id="lightDirectionY" value="-0.25" />
+				<td>Z: <input type="text" id="lightDirectionZ" value="-1.0" />
+			</tr>
+			<tr>
+				<td><b>Colour:</b>
+				<td>R: <input type="text" id="directionalR" value="0" />
+				<td>G: <input type="text" id="directionalG" value="0" />
+				<td>B: <input type="text" id="directionalB" value="1" />
+			</tr>
+		</table>
+
+		<h2>Ambient light:</h2>
+		<table style="border: 0; padding: 10px;">
+			<tr>
+				<td><b>Colour:</b>
+				<td>R: <input type="text" id="ambientR" value="1" />
+				<td>G: <input type="text" id="ambientG" value="1" />
+				<td>B: <input type="text" id="ambientB" value="1" />
+			</tr>
+		</table>
+
+<!-- 		<a href="http://learningwebgl.com/blog/?p=507">&lt;&lt; Back to Lesson 5</a><br /> -->
+</body>
+
+</html>
