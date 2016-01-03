@@ -6,9 +6,12 @@ window.GL = {};
 
 window.GL.gl = null;
 window.GL.shaderProgram = null;
+window.GL.depthShaderProgram = null;
 window.GL.mvMatrix = mat4.create();
 window.GL.mvMatrixStack = [];
 window.GL.pMatrix = mat4.create();
+window.GL.lMatrix = mat4.create();
+window.GL.pMatrix_shadow = mat4.create();
 window.GL.lastTime = 0;
 window.GL.radius = 0.3;
 window.GL.ballVertexPositionBuffer = null;
@@ -36,6 +39,9 @@ window.GL.deltaEye = vec3.create();
 window.GL.deltaCenter = vec3.create();
 window.GL.barLength = 0.005;
 window.GL.increaseForce = true;
+window.GL.shadowFramebuffer = null;
+window.GL.shadowRenderbuffer = null;
+window.GL.shadowTexture = null;
 
 function initGL(canvas) {
     var gl;
@@ -44,6 +50,12 @@ function initGL(canvas) {
         gl = window.GL.gl;
         gl.viewportWidth = canvas.width;
         gl.viewportHeight = canvas.height;
+        var EXT = GL.getExtension("OES_element_index_uint") ||
+            GL.getExtension("MOZ_OES_element_index_uint") ||
+            GL.getExtension("WEBKIT_OES_element_index_uint");
+        var EXT_STD_DERI = GL.getExtension("OES_standard_derivatives")||
+            GL.getExtension("MOZ_OES_standard_derivatives") ||
+            GL.getExtension("WEBKIT_OES_standard_derivatives");
     } catch (e) {
     }
     if (!gl) {
@@ -88,9 +100,27 @@ function getShader(gl, id) {
 
 function initShaders() {
     var gl = window.GL.gl;
-    var shaderProgram;
+    var shaderProgram, depthShaderProgram;
     var fragmentShader = getShader(gl, "per-fragment-lighting-fs");
     var vertexShader = getShader(gl, "per-fragment-lighting-vs");
+    var depthFragmentShader = getShader(gl, "per-fragment-depth-fs");
+    var depthVertexShader = getShader(gl, "per-fragment-depth-vs");
+
+    window.GL.depthShaderProgram = gl.createProgram();
+    depthShaderProgram = window.GL.depthShaderProgram;
+    gl.attachShader(depthShaderProgram, depthVertexShader);
+    gl.attachShader(depthShaderProgram, depthFragmentShader);
+    gl.linkProgram(depthShaderProgram);
+
+    if (!gl.getProgramParameter(depthShaderProgram, gl.LINK_STATUS)) {
+        alert("Could not initialise shaders");
+    }
+
+    gl.useProgram(depthShaderProgram);
+    depthShaderProgram.vertexPositionAttribute = gl.getAttribLocation(depthShaderProgram, "aVertexPosition");
+    depthShaderProgram.pMatrixUniform = gl.getUniformLocation(depthShaderProgram, "uPMatrix");
+    depthShaderProgram.lMatrixUniform = gl.getUniformLocation(depthShaderProgram, "uLMatrix");
+    depthShaderProgram.mvMatrixUniform = gl.getUniformLocation(depthShaderProgram, "uMVMatrix");
 
     window.GL.shaderProgram = gl.createProgram();
     shaderProgram = window.GL.shaderProgram;
@@ -105,15 +135,20 @@ function initShaders() {
     gl.useProgram(shaderProgram);
 
     shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
-    gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
     shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
-    gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
     shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
-    gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
     shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
     shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+    shaderProgram.lMatrixUniform = gl.getUniformLocation(shaderProgram, "uLMatrix");
+    shaderProgram.pMatrixLightUniform = gl.getUniformLocation(shaderProgram, "uPMatrixLight");
     shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+
     shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+    shaderProgram.samplerShadowMapUniform = gl.getUniformLocation(shaderProgram, "uSamplerShadowMap");
+
+    gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+    gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+    gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
 
     //shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
     shaderProgram.ambientLightingColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientLightingColor");
@@ -135,8 +170,23 @@ function initShaders() {
 
     shaderProgram.useColorUniform = gl.getUniformLocation(shaderProgram, "uUseColor");
     shaderProgram.fragColorUniform = gl.getUniformLocation(shaderProgram, "uFragColor");
+
+
+    //mat4.perspective(window.GL.pMatrix_shadow, 45, GL.viewportWidth / GL.viewportHeight, 0.1, 100.0);
+    mat4.perspective(window.GL.pMatrix_shadow, 180, 1, 5, 12.0);
+    mat4.lookAt(window.GL.lMatrix, vec3.fromValues(0, 10, 0), vec3.fromValues(0, 0, 0), vec3.fromValues(0, 0, 1));
+    //mat4.identity(window.GL.lMatrix);
+
     gl.uniform1i(shaderProgram.useColorUniform, false);
     gl.uniform4f(shaderProgram.fragColorUniform, 1.0, 1.0, 1.0, 1.0);
+
+    gl.uniform1i(shaderProgram.samplerUniform, 0);
+    gl.uniform1i(shaderProgram.samplerShadowMapUniform, 1);
+
+    gl.uniformMatrix4fv(depthFragmentShader.lMatrixUniform, false, window.GL.lMatrix);
+    gl.uniformMatrix4fv(depthFragmentShader.pMatrixUniform, false, window.GL.pMatrix_shadow);
+    gl.uniformMatrix4fv(shaderProgram.lMatrixUniform, false, window.GL.lMatrix);
+    gl.uniformMatrix4fv(shaderProgram.pMatrixLightUniform, false, window.GL.pMatrix_shadow);
 
     if (!shaderProgram.useColorUniform) {
         console.log('Getting uniform useColorUniform failed.');
@@ -195,7 +245,7 @@ function mvPushMatrix() {
     var mvMatrix = window.GL.mvMatrix;
     var mvMatrixStack = window.GL.mvMatrixStack;
     var copy = mat4.create();
-    copy = mat4.clone(mvMatrix)
+    copy = mat4.clone(mvMatrix);
     mvMatrixStack.push(copy);
 }
 
@@ -215,7 +265,6 @@ function setMatrixUniforms() {
     gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
     gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
 
-
     var normalMatrix = mat3.create();
     /*
     mat4.toInverseMat3(mvMatrix, normalMatrix);
@@ -223,11 +272,16 @@ function setMatrixUniforms() {
     */
     mat3.normalFromMat4(normalMatrix, mvMatrix);
     gl.uniformMatrix3fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+
+    gl.uniformMatrix4fv(shaderProgram.lMatrixUniform, false, window.GL.lMatrix);
+    gl.uniformMatrix4fv(shaderProgram.pMatrixLightUniform, false, window.GL.pMatrix_shadow);
 }
 
 function setBallsLightingUniforms() {
     var gl = window.GL.gl;
     var shaderProgram = window.GL.shaderProgram;
+    var depthShaderProgram = window.GL.depthShaderProgram;
+
     //gl.uniform3f(shaderProgram.ambientColorUniform, 0.2, 0.2, 0.2);
     //gl.uniform3f(shaderProgram.pointLightingColor, 0.7, 0.7, 0.7);
     gl.uniform3f(shaderProgram.pointLightingDiffuseColorUniform, 0.7, 0.7, 0.7);
@@ -243,8 +297,56 @@ function setBallsLightingUniforms() {
     gl.uniform3f(shaderProgram.materialSpecularColorUniform, 0.5, 0.5, 0.5);
 }
 
+function prerenderShadow() {
+    var gl = window.GL.gl;
+    var balls = window.GL.balls;
+    var shaderProgram = window.GL.shaderProgram;
+    var depthShaderProgram = window.GL.depthShaderProgram;
+
+    gl.disableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+    gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+    gl.disableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+    //gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, window.GL.shadowFramebuffer);
+
+    gl.useProgram(depthShaderProgram);
+
+    gl.enableVertexAttribArray(depthShaderProgram.vertexPositionAttribute);
+
+    gl.viewport(0.0, 0.0, 512, 512);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0); //red -> Z=Zfar on the shadow map
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.uniformMatrix4fv(depthShaderProgram.lMatrixUniform, false, window.GL.lMatrix);
+    gl.uniformMatrix4fv(depthShaderProgram.pMatrixUniform, false, window.GL.pMatrix_shadow);
+
+    prerenderObjTable();
+
+    for (var i = 0; i < balls.length; i++) {
+        //if (balls[i].show) {
+            balls[i].prerender();
+        //}
+    }
+
+    gl.disableVertexAttribArray(depthShaderProgram.vertexPositionAttribute);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(shaderProgram);
+
+    gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+    gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+    gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+    gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+
+}
+
 function drawScene() {
     var balls = window.GL.balls;
+
+    prerenderShadow();
 
     renderForceBar();
 
@@ -253,11 +355,36 @@ function drawScene() {
 
     // Set lighting parameters for other objects.
     setBallsLightingUniforms();
-    //renderTable();
     for (var i = 0; i < balls.length; i++) {
         balls[i].render();
     }
 
+}
+
+function prerenderObjTable() {
+    var gl = window.GL.gl;
+    var mvMatrix = window.GL.mvMatrix;
+    var depthShaderProgram = window.GL.depthShaderProgram;
+    var objTableVertexPositionBuffers = window.GL.objTableVertexPositionBuffers;
+    var objTableVertexIndexBuffers = window.GL.objTableVertexIndexBuffers;
+
+    mvPushMatrix();
+    mat4.identity(mvMatrix);
+    mat4.rotateY(mvMatrix, mvMatrix, Math.PI/2);
+    mat4.scale(mvMatrix, mvMatrix, vec3.fromValues(29, 25, 30));
+    mat4.translate(mvMatrix, mvMatrix, vec3.fromValues(0.002, -0.092, 0.0025));
+
+    gl.uniformMatrix4fv(depthShaderProgram.mvMatrixUniform, false, mvMatrix);
+
+    for (var i = 0; i < objTableParts; i++) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, objTableVertexPositionBuffers[i]);
+        gl.vertexAttribPointer(depthShaderProgram.vertexPositionAttribute, objTableVertexPositionBuffers[i].itemSize, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, objTableVertexIndexBuffers[i]);
+        gl.drawElements(gl.TRIANGLES, objTableVertexIndexBuffers[i].numItems, gl.UNSIGNED_SHORT, 0);
+    }
+
+    mvPopMatrix();
 }
 
 function renderObjTable() {
@@ -289,6 +416,10 @@ function renderObjTable() {
     gl.uniform3f(shaderProgram.pointLightingDiffuseColorUniform, 0.8, 0.8, 0.8);
     gl.uniform3f(shaderProgram.pointLightingSpecularColorUniform, 0.8, 0.8, 0.8);
     gl.uniform1i(shaderProgram.showSpecularHighlightsUniform, true);
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, window.GL.shadowTexture);
+
     for (var i = 0; i < objTableParts; i++) {
         //gl.uniform3f(shaderProgram.ambientColorUniform, 0.2, 0.2, 0.2);
         //gl.uniform3f(shaderProgram.pointLightingColor, 0.7, 0.7, 0.7);
@@ -303,7 +434,9 @@ function renderObjTable() {
         gl.bindBuffer(gl.ARRAY_BUFFER, objTableVertexPositionBuffers[i]);
         gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, objTableVertexPositionBuffers[i].itemSize, gl.FLOAT, false, 0, 0);
 
-        gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+        //gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+        gl.bindBuffer(gl.ARRAY_BUFFER, objTableVertexTextureCoordBuffers[i]);
+        gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, objTableVertexTextureCoordBuffers[i].itemSize, gl.FLOAT, false, 0, 0);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, objTableVertexNormalBuffers[i]);
         gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, objTableVertexNormalBuffers[i].itemSize	, gl.FLOAT, false, 0, 0);
@@ -311,7 +444,7 @@ function renderObjTable() {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, objTableVertexIndexBuffers[i]);
         setMatrixUniforms();
         gl.drawElements(gl.TRIANGLES, objTableVertexIndexBuffers[i].numItems, gl.UNSIGNED_SHORT, 0);
-        gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+        //gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
     }
     mvPopMatrix();
 }
@@ -459,7 +592,7 @@ function initObjTable() {
         objTableVertexIndexBuffers[i] = gl.createBuffer();
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, objTableVertexIndexBuffers[i]);
 
-        vertexIndices[i] = new Array();
+        vertexIndices[i] = [];
         for (var j = 0; j < poolMTLCount[i]; j++) {
             vertexIndices[i].push(j);
         }
@@ -477,6 +610,7 @@ function webGLStart() {
     var gl;
     initGL(canvas);
     initShaders();
+    initShadowBuffers();
     initBallBuffers();
     initTable();
     initObjTable();
@@ -485,8 +619,6 @@ function webGLStart() {
 
     gl = window.GL.gl;
     gl.enable(gl.DEPTH_TEST);
-    gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
 
     window.onkeydown = handleKeyDown;
     window.onkeyup = handleKeyUp;
@@ -513,14 +645,41 @@ Ball.prototype.setPos = function (pos) {
     this.pos[0] = pos[0];
     this.pos[1] = pos[1];
     this.pos[2] = pos[2];
-}
+};
 
 Ball.prototype.setQuat = function (quat) {
     this.quat[0] = quat[0];
     this.quat[1] = quat[1];
     this.quat[2] = quat[2];
     this.quat[3] = quat[3];
-}
+};
+
+Ball.prototype.prerender = function () {
+    var gl = window.GL.gl;
+    var mvMatrix = window.GL.mvMatrix;
+    var ballVertexPositionBuffer = window.GL.ballVertexPositionBuffer;
+    var ballVertexNormalBuffer = window.GL.ballVertexNormalBuffer;
+    var ballVertexIndexBuffer = window.GL.ballVertexIndexBuffer;
+    var depthShaderProgram = window.GL.depthShaderProgram;
+
+    console.log("Prerendering balls");
+
+    mvPushMatrix();
+    var tmpQuat = mat4.create();
+    mat4.translate(mvMatrix, mvMatrix, [this.pos[0], this.pos[1], this.pos[2]]);
+    mat4.fromQuat(tmpQuat, this.quat);
+    mat4.multiply(mvMatrix, mvMatrix, tmpQuat);
+
+    gl.uniformMatrix4fv(depthShaderProgram.mvMatrixUniform, false, mvMatrix);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, ballVertexPositionBuffer);
+    gl.vertexAttribPointer(depthShaderProgram.vertexPositionAttribute, ballVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ballVertexIndexBuffer);
+    gl.drawElements(gl.TRIANGLES, ballVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+
+    mvPopMatrix();
+};
 
 Ball.prototype.render = function () {
     if (!this.texture){
@@ -548,11 +707,13 @@ Ball.prototype.render = function () {
     var tmpQuat = mat4.create();
     mat4.translate(mvMatrix, mvMatrix, [this.pos[0], this.pos[1], this.pos[2]]);
     mat4.fromQuat(tmpQuat, this.quat);
-    mat4.multiply(window.GL.mvMatrix, mvMatrix, tmpQuat);
+    mat4.multiply(mvMatrix, mvMatrix, tmpQuat);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.uniform1i(shaderProgram.samplerUniform, 0);
+    //gl.activeTexture(gl.TEXTURE1);
+    //gl.bindTexture(gl.TEXTURE_2D, window.GL.shadowTexture);
+    //gl.uniform1i(shaderProgram.samplerUniform, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, ballVertexPositionBuffer);
     gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, ballVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
@@ -567,7 +728,7 @@ Ball.prototype.render = function () {
     setMatrixUniforms();
     gl.drawElements(gl.TRIANGLES, ballVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
     mvPopMatrix();
-}
+};
 
 /**
  * Load texture from the given url.
@@ -670,6 +831,36 @@ function initBallBuffers() {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl.STATIC_DRAW);
     ballVertexIndexBuffer.itemSize = 1;
     ballVertexIndexBuffer.numItems = indexData.length;
+}
+
+function initShadowBuffers() {
+    var gl = window.GL.gl;
+
+    window.GL.shadowFramebuffer = gl.createFramebuffer();
+    var fb = window.GL.shadowFramebuffer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+
+    window.GL.shadowRenderbuffer = gl.createRenderbuffer();
+    var rb = window.GL.shadowRenderbuffer;
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 512, 512);
+
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+        gl.RENDERBUFFER, rb);
+
+    window.GL.shadowTexture = gl.createTexture();
+    var texture_rtt = window.GL.shadowTexture;
+    gl.bindTexture(gl.TEXTURE_2D, texture_rtt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512,
+        0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D, texture_rtt, 0);
+
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 
 function initTableBuffers() {
