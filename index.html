@@ -1,7 +1,6 @@
 <html>
     <head>
         <title>Flashing Pool</title>
-        <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
         <script type="text/javascript" src="obj/obj.js"></script>
         <script type="text/javascript" src="js/physics.js"></script>
         <script type="text/javascript" src="lib/gl-matrix.js"></script>
@@ -38,6 +37,41 @@
                 gl_FragColor = vec4(fragmentColor.rgb * lightWeighting, fragmentColor.a);
             }
         </script> -->
+
+        <script id="per-fragment-depth-fs" type="x-shader/x-fragment">
+//            #extension GL_OES_standard_derivatives : enable
+            precision mediump float;
+            varying float vDepth;
+
+            void main(void) {
+//                gl_FragColor = vec4(vDepth, vDepth * 256., vDepth * 256. * 256., vDepth * 256. * 256. * 256.);
+//                float vDepth2 = max(vDepth - 0.9, 0.) * 10.0;
+                gl_FragColor = vec4(vDepth, 0., 0., 1.);
+                // approximate the spatial average of vDepth²;
+//                float depth2 = vDepth * vDepth;
+//                float dx = dFdx(vDepth);
+//                float dy = dFdy(vDepth);
+//                float depth2Avg = depth2 + 0.25 * (dx * dx + dy * dy);
+                
+//                gl_FragColor = vec4(vDepth, depth2Avg, 0., 1.);
+
+            }
+        </script>
+
+        <script id="per-fragment-depth-vs" type="x-shader/x-vertex">
+            attribute vec3 aVertexPosition;
+            uniform mat4 uPMatrix, uLMatrix, uMVMatrix;
+            varying float vDepth;
+
+            void main(void) {
+                vec4 position = uPMatrix * uLMatrix * uMVMatrix * vec4(aVertexPosition, 1.);
+                float zBuf = position.z / position.w; //Z-buffer between -1 and 1
+                vDepth = 0.5 + zBuf * 0.5; //between 0 and 1
+//                vDepth = aVertexPosition.y;
+                gl_Position = position;
+            }
+        </script>
+
         <script id="per-fragment-lighting-fs" type="x-shader/x-fragment">
 
             precision mediump float;
@@ -45,6 +79,7 @@
             varying vec2 vTextureCoord;
             varying vec3 vTransformedNormal;
             varying vec4 vPosition;
+            varying vec3 vLightPos;
 
             uniform vec3 uMaterialAmbientColor;
             uniform vec3 uMaterialDiffuseColor;
@@ -65,11 +100,33 @@
             uniform vec3 uPointLightingSpecularColor;
 
             uniform sampler2D uSampler;
+            uniform sampler2D uSamplerShadowMap;
 
             void main(void) {
                 if (uUseColor) {
                     gl_FragColor = uFragColor;
                 } else {
+                    vec2 uv_shadowMap = vLightPos.xy;
+//                    vec4 shadowMapColor = texture2D(uSamplerShadowMap, uv_shadowMap);
+//                    float variance = shadowMapColor.g - shadowMapColor.r * shadowMapColor.r;
+//                    float zShadowMap = shadowMapColor.r + shadowMapColor.g / 256.0 + shadowMapColor.b / 256. / 256. + shadowMapColor.a / 256. / 256. / 256.;
+//                    float shadowCoeff=1.-smoothstep(0.000, 0.5, vLightPos.z-zShadowMap);
+//                    float zShadowMap = shadowMapColor.r;
+//                    variance=max(variance, 0.002);
+//                    float d = shadowMapColor.r - vLightPos.z;
+//                    float shadowCoeff= variance / (variance + d*d);
+
+                    float sum = 0.;
+                    vec2 duv;
+                    for(float pcf_x = -1.5; pcf_x <= 1.5; pcf_x += 1.) {
+                        for(float pcf_y = -1.5; pcf_y <= 1.5; pcf_y += 1.) {
+                            duv = vec2(pcf_x / 512., pcf_y / 512.);
+                            sum += texture2D(uSamplerShadowMap, uv_shadowMap + duv).r;
+                        }
+                    }
+                    sum /= 16.;
+                    float shadowCoeff = 1.0 - smoothstep(0.001, 0.04, vLightPos.z - sum);
+
                     vec3 ambientLightWeighting = uAmbientLightingColor;
 
                     vec3 lightDirection = normalize(uPointLightingLocation - vPosition.xyz);
@@ -101,14 +158,15 @@
                     }
                     gl_FragColor = vec4(
                         materialAmbientColor * ambientLightWeighting
-                        + materialDiffuseColor * diffuseLightWeighting
-                        + materialSpecularColor * specularLightWeighting
-                        + materialEmissiveColor,
+                        + materialDiffuseColor * diffuseLightWeighting * shadowCoeff
+                        + materialSpecularColor * specularLightWeighting * shadowCoeff
+                        + materialEmissiveColor * shadowCoeff,
                         alpha
                     );
                 }
             }
         </script>
+
         <script id="per-fragment-lighting-vs" type="x-shader/x-vertex">
             attribute vec3 aVertexPosition;
             attribute vec3 aVertexNormal;
@@ -116,17 +174,27 @@
 
             uniform mat4 uMVMatrix;
             uniform mat4 uPMatrix;
+            uniform mat4 uLMatrix;
+            uniform mat4 uPMatrixLight;
             uniform mat3 uNMatrix;
 
             varying vec2 vTextureCoord;
             varying vec3 vTransformedNormal;
             varying vec4 vPosition;
+            varying vec3 vLightPos;
 
             void main(void) {
                 vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
                 gl_Position = uPMatrix * vPosition;
                 vTextureCoord = aTextureCoord;
                 vTransformedNormal = uNMatrix * aVertexNormal;
+
+                //Shadow mapping :
+//                vec4 lightPos = uLMatrix * vec4(aVertexPosition, 1.0);
+                vec4 lightPos = uPMatrixLight * uLMatrix * vPosition;
+                vec3 lightPosDNC = lightPos.xyz / lightPos.w;
+                vLightPos = vec3(0.5, 0.5, 0.5) + lightPosDNC * 0.5;
+
             }
         </script>
     </head>

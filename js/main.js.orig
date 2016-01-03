@@ -39,15 +39,18 @@ window.GL.deltaEye = vec3.create();
 window.GL.deltaCenter = vec3.create();
 window.GL.barLength = 0.005;
 window.GL.increaseForce = true;
+<<<<<<< HEAD
 window.GL.mouseDown = false;
 window.GL.lastMouseX = 0;
 window.GL.lastMouseY = 0;
-window.GL.shadowFramebuffer = null;
-window.GL.shadowRenderbuffer = null;
-window.GL.shadowTexture = null;
 window.GL.lastDir = vec3.create();
 window.GL.lastUp = vec3.create();
 window.GL.hittable = false;
+=======
+window.GL.shadowFramebuffer = null;
+window.GL.shadowRenderbuffer = null;
+window.GL.shadowTexture = null;
+>>>>>>> origin/master
 
 function initGL(canvas) {
     var gl;
