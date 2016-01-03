@@ -1,4 +1,4 @@
-var poolMTLNumMaterials = 4;
+var objTableParts = 4;
 
 var poolMTLFirst = [
 0,

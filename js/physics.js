@@ -4,7 +4,7 @@ window.PHYSICS.dt = 1/60;
 
 window.PHYSICS.l1 = 12.66;
 window.PHYSICS.l2 = 12.7;
-window.PHYSICS.h = 1.5;
+window.PHYSICS.h = 2;
 window.PHYSICS.w1 = 0.7;
 window.PHYSICS.w2 = 0.8;
 window.PHYSICS.w3 = 0.7;
@@ -13,8 +13,8 @@ window.PHYSICS.oy = 0;
 window.PHYSICS.oz = 0;
 window.PHYSICS.t = 0.001;
 
-window.PHYSICS.radius = 0.6;
-window.PHYSICS.mass = 5;
+window.PHYSICS.radius = 0.3;
+window.PHYSICS.mass = 5000;
 
 window.PHYSICS.boxBodies = [];
 window.PHYSICS.boxShapes = [];
@@ -33,7 +33,8 @@ function initCannon(){
 
     world.defaultContactMaterial.contactEquationStiffness = 1e11;
     world.defaultContactMaterial.contactEquationRelaxation = 4;
-    world.defaultContactMaterial.friction = 0.5;
+    world.defaultContactMaterial.friction = 0.05;
+    world.defaultContactMaterial.restitution = 0.9;
 
     world.gravity.set(0,-10,0);
     world.broadphase = new CANNON.NaiveBroadphase();
@@ -42,10 +43,7 @@ function initCannon(){
     physicsMaterial.friction = 0.5;
     var physicsContactMaterial = new CANNON.ContactMaterial(
         physicsMaterial,
-        physicsMaterial, {
-            friction: 0.5,
-            restitution: 1
-        }
+        physicsMaterial
     );
     world.addContactMaterial(physicsContactMaterial);
 
@@ -79,22 +77,22 @@ function initPhysicsBalls() {
     var ballShapes = window.PHYSICS.ballShapes;
 
     var inits = [
-        [0, 0.6, 8.2],
-        [0.000000, 0.6, -6.950000],
-        [0.600000, 0.6, -7.989230],
-        [-0.600000, 0.6, -7.989230],
-        [1.200000, 0.6, -9.028461],
-        [0.000000, 0.6, -9.028461],
-        [-1.200000, 0.6, -9.028461],
-        [1.800000, 0.6, -10.067691],
-        [0.600000, 0.6, -10.067691],
-        [-0.600000, 0.6, -10.067691],
-        [-1.800000, 0.6, -10.067691],
-        [2.400000, 0.6, -11.106922],
-        [1.200000, 0.6, -11.106922],
-        [0.000000, 0.6, -11.106922],
-        [-1.200000, 0.6, -11.106922],
-        [-2.400000, 0.6, -11.106922]
+        [0, 0.3, 8.2],
+        [0.000000, 0.3, -6.650000],
+        [0.300000, 0.3, -7.169615],
+        [-0.300000, 0.3, -7.169615],
+        [0.600000, 0.3, -7.689230],
+        [0.000000, 0.3, -7.689230],
+        [-0.600000, 0.3, -7.689230],
+        [0.900000, 0.3, -8.208846],
+        [0.300000, 0.3, -8.208846],
+        [-0.300000, 0.3, -8.208846],
+        [-0.900000, 0.3, -8.208846],
+        [1.200000, 0.3, -8.728461],
+        [0.600000, 0.3, -8.728461],
+        [0.000000, 0.3, -8.728461],
+        [-0.600000, 0.3, -8.728461],
+        [-1.200000, 0.3, -8.728461],
     ];
 
     for (var i = 0; i < inits.length; i++) {
@@ -106,7 +104,7 @@ function initPhysicsBalls() {
         ballBodies.push(tmpBallBody);
         ballShapes.push(tmpBallShape);
     }
-    ballBodies[0].velocity = new CANNON.Vec3(0, 0, -50);
+    ballBodies[0].velocity = new CANNON.Vec3(1, 0, -50);
     //ballBodies[0].applyImpulse(new Vec3(100, 100, 100), ballBodies[0].position);
 }
 
@@ -154,22 +152,4 @@ function initPhysicsBoxes() {
         boxBodies.push(tmpBoxBody);
         boxShapes.push(tmpBoxShape);
     }
-    console.log('initBox')
 }
-
-function animatePhysics() {
-    var balls = window.PHYSICS.ballBodies;
-    if(controls.enabled){
-        world.step(dt);
-
-        // Update ball positions
-        for(var i=0; i<balls.length; i++){
-            if (balls[i].velocity.length < 1)
-                balls[i].velocity.setZero();
-            else
-                balls[i].velocity = balls[i].velocity.scale(0.97);
-        }
-    }
-    requestAnimationFrame( animate );
-}
-
