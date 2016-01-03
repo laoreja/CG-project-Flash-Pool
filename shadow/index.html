@@ -73,8 +73,8 @@
             vec3 I_ambient = source_ambient_color * mat_ambient_color;
             vec3 I_diffuse = source_diffuse_color * mat_diffuse_color * max(0., dot(vNormal, source_direction));
 
-            vec3 I = I_ambient+shadowCoeff * I_diffuse;
-            gl_FragColor = vec4(I*color, 1.);
+            vec3 I = I_ambient + shadowCoeff * I_diffuse;
+            gl_FragColor = vec4(I * color, 1.);
         }
     </script>
 </head>

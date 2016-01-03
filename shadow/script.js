@@ -27,6 +27,10 @@ function mouseMove(e) {
     e.preventDefault();
 }
 
+function degToRad(deg) {
+    return deg * Math.PI / 180;
+}
+
 function initGL(canvas) {
     CANVAS = canvas;
     try {
@@ -42,8 +46,6 @@ function initGL(canvas) {
         alert("Could not initialise WebGL, sorry :-(");
     }
 }
-
-/*========================= SHADERS ========================= */
 
 function getShader(gl, id) {
     var shaderScript = document.getElementById(id);
@@ -124,9 +126,6 @@ function initShaders() {
     GL.uniform3fv(_lightDirection, LIGHTDIR);
 }
 
-
-/*========================= THE DRAGON ========================= */
-
 function initDragon(callback) {
     CUBE_VERTEX = false;
     CUBE_FACES = false;
@@ -152,7 +151,6 @@ function initDragon(callback) {
     });
 
 }
-/*========================= THE FLOOR ========================= */
 
 function initFloor() {
     var floor_vertices = [
@@ -172,21 +170,35 @@ function initFloor() {
         new Uint16Array([0, 1, 2, 0, 2, 3]), GL.STATIC_DRAW);
 }
 
-
-/*========================= MATRIX ========================= */
-
 function initMatrix() {
+    PROJMATRIX = mat4.create();
+    mat4.perspective(PROJMATRIX, degToRad(40), CANVAS.width / CANVAS.height, 1, 100);
+    console.log(PROJMATRIX);
     PROJMATRIX = LIBS.get_projection(40, CANVAS.width / CANVAS.height, 1, 100);
-    MOVEMATRIX = LIBS.get_I4();
-    VIEWMATRIX = LIBS.get_I4();
+    console.log(PROJMATRIX);
 
-    LIBS.translateZ(VIEWMATRIX, -20);
-    LIBS.translateY(VIEWMATRIX, -4);
+    MOVEMATRIX = mat4.create();
+
+    VIEWMATRIX = mat4.create();
+    console.log(VIEWMATRIX);
+    mat4.translate(VIEWMATRIX, VIEWMATRIX, [0, -4, -20]);
+
     THETA = 0;
     PHI = 0;
 
+    PROJMATRIX_SHADOW = mat4.create();
+    mat4.ortho(PROJMATRIX_SHADOW, -100/2, 100/2, 100/2, -100/2, 5, 28);
+    console.log(PROJMATRIX_SHADOW);
     PROJMATRIX_SHADOW = LIBS.get_projection_ortho(100, 1, 5, 28);
+    console.log(PROJMATRIX_SHADOW);
+
+    LIGHTMATRIX = mat4.create();
+    var up = vec3.fromValues(0, 1, 0);
+    var center = vec3.fromValues(0, 0, 0);
+    mat4.lookAt(LIGHTMATRIX, LIGHTDIR, center, up);
+    console.log(LIGHTMATRIX);
     LIGHTMATRIX = LIBS.lookAtDir(LIGHTDIR, [0, 1, 0], [0, 0, 0]);
+    console.log(LIGHTMATRIX);
 }
 
 
@@ -217,9 +229,6 @@ function initTextures() {
     CUBE_TEXTURE = get_texture("resources/dragon.png");
     FLOOR_TEXTURE = get_texture("resources/granit.jpg");
 }
-
-
-    /*======================= RENDER TO TEXTURE ======================= */
 
 function initBuffers() {
 
@@ -257,9 +266,9 @@ function animate () {
         THETA += dX;
         PHI += dY;
     }
-    LIBS.set_I4(MOVEMATRIX);
-    LIBS.rotateY(MOVEMATRIX, THETA);
-    LIBS.rotateX(MOVEMATRIX, PHI);
+    mat4.identity(MOVEMATRIX);
+    mat4.rotateY(MOVEMATRIX, MOVEMATRIX, -THETA);
+    mat4.rotateX(MOVEMATRIX, MOVEMATRIX, -PHI);
     TIME_OLD = now;
 }
 
