@@ -36,6 +36,12 @@ window.GL.deltaEye = vec3.create();
 window.GL.deltaCenter = vec3.create();
 window.GL.barLength = 0.005;
 window.GL.increaseForce = true;
+window.GL.mouseDown = false;
+window.GL.lastMouseX = 0;
+window.GL.lastMouseY = 0;
+window.GL.lastDir = vec3.create();
+window.GL.lastUp = vec3.create();
+window.GL.hittable = false;
 
 function initGL(canvas) {
     var gl;
@@ -221,7 +227,10 @@ function setMatrixUniforms() {
     mat4.toInverseMat3(mvMatrix, normalMatrix);
     mat3.transpose(normalMatrix);
     */
-    mat3.normalFromMat4(normalMatrix, mvMatrix);
+    //mat3.normalFromMat4(normalMatrix, mvMatrix);
+    mat3.fromMat4(normalMatrix, mvMatrix);
+    mat3.transpose(normalMatrix, normalMatrix);
+    mat3.invert(normalMatrix, normalMatrix);
     gl.uniformMatrix3fv(shaderProgram.nMatrixUniform, false, normalMatrix);
 }
 
@@ -230,8 +239,8 @@ function setBallsLightingUniforms() {
     var shaderProgram = window.GL.shaderProgram;
     //gl.uniform3f(shaderProgram.ambientColorUniform, 0.2, 0.2, 0.2);
     //gl.uniform3f(shaderProgram.pointLightingColor, 0.7, 0.7, 0.7);
-    gl.uniform3f(shaderProgram.pointLightingDiffuseColorUniform, 0.7, 0.7, 0.7);
-    gl.uniform3f(shaderProgram.pointLightingSpecularColorUniform, 0.7, 0.7, 0.7);
+    gl.uniform3f(shaderProgram.pointLightingDiffuseColorUniform, 0.9, 0.9, 0.9);
+    gl.uniform3f(shaderProgram.pointLightingSpecularColorUniform, 0.9, 0.9, 0.9);
     gl.uniform3f(shaderProgram.pointLightingLocationUniform, 0, 10.0, 0);
     gl.uniform1i(shaderProgram.useTexturesUniform, true);
     gl.uniform3f(shaderProgram.ambientLightingColorUniform, 0.2, 0.2, 0.2);
@@ -240,7 +249,7 @@ function setBallsLightingUniforms() {
     gl.uniform3f(shaderProgram.materialDiffuseColorUniform, 0.9, 0.9, 0.9);
     gl.uniform3f(shaderProgram.materialEmissiveColorUniform, 0, 0, 0);
     gl.uniform1f(shaderProgram.materialShininessUniform, 2);
-    gl.uniform3f(shaderProgram.materialSpecularColorUniform, 0.5, 0.5, 0.5);
+    gl.uniform3f(shaderProgram.materialSpecularColorUniform, 0.25, 0.25, 0.25);
 }
 
 function drawScene() {
@@ -255,7 +264,9 @@ function drawScene() {
     setBallsLightingUniforms();
     //renderTable();
     for (var i = 0; i < balls.length; i++) {
-        balls[i].render();
+        if (balls[i].show) {
+            balls[i].render();
+        }
     }
 
 }
@@ -275,7 +286,7 @@ function renderObjTable() {
 
     var tmpPerspective = mat4.create();
     var tmpLookat = mat4.create();
-    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
+    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 10000.0);
     mat4.lookAt(tmpLookat, eye, center, up);
     mat4.multiply(pMatrix, tmpPerspective, tmpLookat);
 
@@ -337,7 +348,7 @@ function renderTable() {
 
     var tmpPerspective = mat4.create();
     var tmpLookat = mat4.create();
-    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
+    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 10000.0);
     mat4.lookAt(tmpLookat, eye, center, up);
     mat4.multiply(pMatrix, tmpPerspective, tmpLookat);
 
@@ -363,11 +374,47 @@ function renderTable() {
     mvPopMatrix();
 }
 
-function animate() {
-    var lastTime = window.GL.lastTime;
-    var timeNow = new Date().getTime();
+function checkBalls() {
+    var balls = window.GL.balls;
+    var conflict = false;
 
-    window.GL.lastTime = timeNow;
+    if (checkOutTable(balls[0].pos)) {
+        for (var i = 8.2; i > 0; i -= 0.6) {
+            for (var j = 1; j < balls.length; j++) {
+                if (balls[j].show && Math.sqrt(balls[j].pos[0]*balls[j].pos[0] + (balls[j].pos[2]-i)*(balls[j].pos[2]-i)) < 0.6) {
+                    conflict = true;
+                    break;
+                }
+            }
+            if (conflict) {
+                conflict = false;
+            } else {
+                window.PHYSICS.ballBodies[0].position.set(0, 0.3, i);
+                window.PHYSICS.ballBodies[0].velocity.set(0, 0, 0);
+                window.PHYSICS.ballBodies[0].angularVelocity.set(0, 0, 0);
+                break;
+            }
+        }
+    }
+    for (var i = 1; i < balls.length; i++) {
+        if (!balls[i].show) {
+            continue;
+        }
+        if (checkOutTable(balls[i].pos)) {
+            balls[i].show = false;
+        }
+    }
+}
+
+function checkOutTable(pos) {
+
+    if (Math.abs(pos[2]) > 13.06 && Math.abs(pos[0]) > 6.35) {
+        return true;
+    }
+    if (Math.abs(pos[2]) < 0.4 && Math.abs(pos[0]) > 6.35) {
+        return true;
+    }
+    return false;
 }
 
 function tick() {
@@ -377,8 +424,8 @@ function tick() {
     updatePosition();
     updateView();
     handleKey();
+    checkBalls();
     drawScene();
-    animate();
 }
 
 function updatePosition() {
@@ -490,6 +537,10 @@ function webGLStart() {
 
     window.onkeydown = handleKeyDown;
     window.onkeyup = handleKeyUp;
+    canvas.onmousedown = handleMouseDown;
+    canvas.onmousemove = handleMouseMove;
+    canvas.onmouseup = handleMouseUp;
+    canvas.onwheel = handleWheel;
 
     tick();
 }
@@ -506,6 +557,7 @@ function Ball(initPos, texUrl) {
     this.pos[1] = initPos[1];
     this.pos[2] = initPos[2];
     this.quat = [0, 0, 0, 1];
+    this.show = true;
     loadTexture(this, texUrl);
 }
 
@@ -540,7 +592,7 @@ Ball.prototype.render = function () {
 
     var tmpPerspective = mat4.create();
     var tmpLookat = mat4.create();
-    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
+    mat4.perspective(tmpPerspective, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 10000.0);
     mat4.lookAt(tmpLookat, eye, center, up);
     mat4.multiply(pMatrix, tmpPerspective, tmpLookat);
 
@@ -791,16 +843,119 @@ function renderForceBar() {
     //gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
 }
 
+function handleWheel(event) {
+    var eye = window.GL.eye;
+    var center = window.GL.center;
+    var dir = vec3.create();
+    vec3.subtract(dir, center, eye);
+    if (event.deltaY > 0) {
+        if (vec3.length(dir) < 1) {
+            return false;
+        }
+        vec3.scale(dir, dir, 1/vec3.length(dir));
+    } else {
+        vec3.scale(dir, dir, -1/vec3.length(dir));
+    }
+    vec3.add(eye, eye, dir);
+    return false;
+}
+
+function handleMouseMove(event) {
+    if (!window.GL.mouseDown) {
+        return;
+    }
+    var eye = window.GL.eye;
+    var center = window.GL.center;
+    var up = window.GL.up;
+    var tmpVec3 = vec3.create();
+    var lastDir = window.GL.lastDir;
+    var lastUp = window.GL.lastUp;
+    vec3.rotateY(tmpVec3, lastDir, vec3.fromValues(0, 0, 0), (window.GL.lastMouseX - event.clientX)/100);
+    vec3.rotateY(up, lastUp, vec3.fromValues(0, 0, 0), (window.GL.lastMouseX - event.clientX)/100);
+    /*
+    var tmpVec4 = vec4.fromValues(tmpVec3[0], tmpVec3[1], tmpVec3[2], 1);
+    var tmpMat4 = mat4.create();
+    mat4.fromRotation(tmpMat4, (window.GL.lastMouseY - event.clientY)/1000, vec3.fromValues(-lastDir[2], 0, lastDir[0]));
+    vec4.transformMat4(tmpVec4, tmpVec4, tmpMat4);
+    vec3.subtract(eye, center, vec3.fromValues(tmpVec4[0]/tmpVec4[3], tmpVec4[1]/tmpVec4[3], tmpVec4[2]/tmpVec4[3]));
+
+    mat4.fromRotation(tmpMat4, (window.GL.lastMouseY - event.clientY)/1000, vec3.fromValues(-lastDir[2], 0, lastDir[0]));
+    vec4.set(tmpVec4, up[0], up[1], up[2], 1);
+    vec4.transformMat4(tmpVec4, tmpVec4, tmpMat4);
+    vec3.set(up, tmpVec4[0]/tmpVec4[3], tmpVec4[1]/tmpVec4[3], tmpVec4[2]/tmpVec4[3]);
+
+    console.log(tmpVec3);
+    */
+    vec3.subtract(eye, center, tmpVec3);
+
+    checkEyePlane();
+}
+
+function checkEyePlane() {
+    var eye = window.GL.eye;
+    var center = window.GL.center;
+
+    if (eye[1] < center[1]) {
+        eye[1] = center[1];
+    }
+}
+
+function handleMouseDown(event) {
+    window.GL.mouseDown = true;
+    window.GL.lastMouseX = event.clientX;
+    window.GL.lastMouseY = event.clientY;
+    vec3.subtract(window.GL.lastDir, window.GL.center, window.GL.eye);
+    vec3.copy(window.GL.lastUp, window.GL.up);
+}
+
+function handleMouseUp(event) {
+    window.GL.mouseDown = false;
+}
+
 function handleKeyUp(event) {
     window.GL.keyPressed[event.keyCode] = false;
     if (event.keyCode === 32) {
-        window.GL.barLength = 0.005;
+
         window.GL.increaseForce = true;
+        if (window.GL.updatingView) {
+            return;
+        }
+        if (!window.GL.hittable) {
+            return;
+        }
+        if (window.GL.barLength >= 0.2) {
+            var tmp = vec3.create();
+            var center = window.GL.center;
+            var eye = window.GL.eye;
+            vec3.subtract(tmp, center, eye);
+            tmp[1] = 0;
+            vec3.scale(tmp, tmp, window.GL.barLength/vec3.length(tmp)*20);
+            window.PHYSICS.ballBodies[0].velocity = new CANNON.Vec3(tmp[0], 0, tmp[2]);
+        }
+        window.GL.barLength = 0.005;
+        window.GL.hittable = false;
     }
 }
 
 function handleKeyDown(event) {
     window.GL.keyPressed[event.keyCode] = true;
+    if (event.keyCode === 32) {
+        if (window.GL.updatingView) {
+            return;
+        }
+        if (window.PHYSICS.ballBodies[0].velocity.length > 0.5) {
+            return;
+        }
+        var balls = window.GL.balls;
+        var tmp = vec3.fromValues(balls[0].pos[0], balls[0].pos[1], balls[0].pos[2]);
+        var center = window.GL.center;
+        vec3.subtract(tmp, tmp, center);
+        if (vec3.length(tmp) > 0.5) {
+            enterCueBallView();
+            return;
+        }
+        window.GL.hittable = true;
+    }
     if (event.keyCode === 48) {// key '0'
         if (window.GL.updatingView) {
             return;
@@ -875,6 +1030,12 @@ function handleKey() {
     var center = window.GL.center;
     var keyPressed = window.GL.keyPressed;
     if (keyPressed[32]) { // space
+        if (window.GL.updatingView) {
+            return;
+        }
+        if (!window.GL.hittable) {
+            return;
+        }
         if (window.GL.barLength > 2) {
             window.GL.increaseForce = false;
         }

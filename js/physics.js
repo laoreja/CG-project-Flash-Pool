@@ -104,8 +104,6 @@ function initPhysicsBalls() {
         ballBodies.push(tmpBallBody);
         ballShapes.push(tmpBallShape);
     }
-    ballBodies[0].velocity = new CANNON.Vec3(1, 0, -50);
-    //ballBodies[0].applyImpulse(new Vec3(100, 100, 100), ballBodies[0].position);
 }
 
 function initPhysicsBoxes() {
