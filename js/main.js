@@ -30,6 +30,12 @@ window.GL.objTableVertexPositionBuffers = new Array(objTableParts);
 window.GL.objTableVertexNormalBuffers = new Array(objTableParts);
 window.GL.objTableVertexTextureCoordBuffers = new Array(objTableParts);
 window.GL.objTableVertexIndexBuffers = new Array(objTableParts);
+window.GL.updatingView = false;
+window.GL.viewIndex = 0;
+window.GL.deltaEye = vec3.create();
+window.GL.deltaCenter = vec3.create();
+window.GL.barLength = 0.005;
+window.GL.increaseForce = true;
 
 function initGL(canvas) {
     var gl;
@@ -127,6 +133,17 @@ function initShaders() {
     shaderProgram.useTexturesUniform = gl.getUniformLocation(shaderProgram, "uUseTextures");
     shaderProgram.showSpecularHighlightsUniform = gl.getUniformLocation(shaderProgram, "uShowSpecularHighlights");
 
+    shaderProgram.useColorUniform = gl.getUniformLocation(shaderProgram, "uUseColor");
+    shaderProgram.fragColorUniform = gl.getUniformLocation(shaderProgram, "uFragColor");
+    gl.uniform1i(shaderProgram.useColorUniform, false);
+    gl.uniform4f(shaderProgram.fragColorUniform, 1.0, 1.0, 1.0, 1.0);
+
+    if (!shaderProgram.useColorUniform) {
+        console.log('Getting uniform useColorUniform failed.');
+    }
+    if (!shaderProgram.fragColorUniform) {
+        console.log('Getting uniform fragColorUniform failed.');
+    }
     if (!shaderProgram.mvMatrixUniform) {
         console.log('Getting uniform mvMatrixUniform failed.');
     }
@@ -228,6 +245,8 @@ function setBallsLightingUniforms() {
 
 function drawScene() {
     var balls = window.GL.balls;
+
+    renderForceBar();
 
     // Lighting parameters will be set for each part of the table.
     renderObjTable();
@@ -355,13 +374,14 @@ function tick() {
     var gl = window.GL.gl;
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     requestAnimFrame(tick);
-    update();
+    updatePosition();
+    updateView();
     handleKey();
     drawScene();
     animate();
 }
 
-function update() {
+function updatePosition() {
     var renderBalls = window.GL.balls;
     var physicalBalls = window.PHYSICS.ballBodies;
 
@@ -372,7 +392,8 @@ function update() {
         if (physicalBalls[i].velocity.length() < 5) {
             physicalBalls[i].velocity = physicalBalls[i].velocity.scale(0.99);
             physicalBalls[i].angularVelocity = physicalBalls[i].angularVelocity.scale(0.99);
-        } else if (physicalBalls[i].velocity.length() < 1e-5) {
+        }
+        if (physicalBalls[i].velocity.length() < 1e-5) {
             physicalBalls[i].velocity.setZero();
             physicalBalls[i].angularVelocity.setZero();
         }
@@ -733,18 +754,136 @@ function initBalls() {
     }
 }
 
+function renderForceBar() {
+    var gl = window.GL.gl;
+    var shaderProgram = window.GL.shaderProgram;
+    var pMatrix = window.GL.pMatrix;
+    var mvMatrix = window.GL.mvMatrix;
+    var len = window.GL.barLength/10;
+
+    if (len < 0.01) {
+        return;
+    }
+
+    var vertices = [
+        -0.8, -0.8, 0,
+        -0.7, -0.8, 0,
+        -0.8, -0.8+len, 0,
+        -0.7, -0.8+len, 0
+    ];
+
+    gl.uniform1i(shaderProgram.useColorUniform, true);
+    //gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+    //gl.disableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+    mat4.identity(pMatrix);
+    mat4.identity(mvMatrix);
+    gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+    gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+    var buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    buffer.itemSize = 3;
+    buffer.numItem = 4;
+    gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, buffer.itemSize, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.uniform1i(shaderProgram.useColorUniform, false);
+    //gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+    //gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+}
+
 function handleKeyUp(event) {
     window.GL.keyPressed[event.keyCode] = false;
+    if (event.keyCode === 32) {
+        window.GL.barLength = 0.005;
+        window.GL.increaseForce = true;
+    }
 }
 
 function handleKeyDown(event) {
     window.GL.keyPressed[event.keyCode] = true;
+    if (event.keyCode === 48) {// key '0'
+        if (window.GL.updatingView) {
+            return;
+        }
+        enterTableView();
+    }
+    if (event.keyCode === 49) {// key '1'
+        if (window.GL.updatingView) {
+            return;
+        }
+        enterCueBallView();
+    }
+}
+
+function updateView() {
+    if (window.GL.updatingView) {
+        console.log('updating view');
+        var eye = window.GL.eye;
+        var center = window.GL.center;
+        var deltaEye = window.GL.deltaEye;
+        var deltaCenter = window.GL.deltaCenter;
+        vec3.add(eye, eye, deltaEye);
+        vec3.add(center, center, deltaCenter);
+    } else {
+        return;
+    }
+    window.GL.viewIndex += 1;
+    if (Math.abs(window.GL.viewIndex - 100) < 1e-3) {
+        window.GL.updatingView = false;
+        window.GL.viewIndex = 0;
+    }
+}
+
+function enterTableView() {
+    var eye = window.GL.eye;
+    var center = window.GL.center;
+    var dir = vec3.create();
+    vec3.subtract(dir, eye, center);
+    var targetCenter = vec3.fromValues(0, 0, 0);
+    var targetEye = vec3.create();
+    vec3.scale(targetEye, dir, 25/vec3.length(dir));
+    var deltaEye = window.GL.deltaEye;
+    var deltaCenter = window.GL.deltaCenter;
+    vec3.subtract(deltaCenter, targetCenter, center);
+    vec3.scale(deltaCenter, deltaCenter, 1e-2);
+    vec3.subtract(deltaEye, targetEye, eye);
+    vec3.scale(deltaEye, deltaEye, 1e-2);
+    window.GL.updatingView = true;
+}
+
+function enterCueBallView() {
+    var eye = window.GL.eye;
+    var center = window.GL.center;
+    var dir = vec3.create();
+    var balls = window.GL.balls;
+    vec3.subtract(dir, eye, center);
+    var targetCenter = vec3.fromValues(balls[0].pos[0], balls[0].pos[1], balls[0].pos[2]);
+    var targetEye = vec3.create();
+    vec3.scale(dir, dir, 5/vec3.length(dir));
+    vec3.add(targetEye, dir, targetCenter)
+    var deltaEye = window.GL.deltaEye;
+    var deltaCenter = window.GL.deltaCenter;
+    vec3.subtract(deltaCenter, targetCenter, center);
+    vec3.scale(deltaCenter, deltaCenter, 1e-2);
+    vec3.subtract(deltaEye, targetEye, eye);
+    vec3.scale(deltaEye, deltaEye, 1e-2);
+    window.GL.updatingView = true;
 }
 
 function handleKey() {
     var eye = window.GL.eye;
     var center = window.GL.center;
     var keyPressed = window.GL.keyPressed;
+    if (keyPressed[32]) { // space
+        if (window.GL.barLength > 2) {
+            window.GL.increaseForce = false;
+        }
+        if (window.GL.increaseForce) {
+            window.GL.barLength *= 1.1;
+        } else {
+            window.GL.barLength /= 1.1;
+        }
+    }
     if (keyPressed[65]) { // key 'a'
         moveLeft();
     }
